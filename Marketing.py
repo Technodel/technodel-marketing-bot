@@ -7,7 +7,7 @@ from groq import Groq
 from duckduckgo_search import DDGS
 
 # --- 1. AI CONFIGURATION ---
-GROQ_API_KEY = "GROQ_API_KEY = st.secrets["GROQ_API_KEY"]"
+GROQ_API_KEY = GROQ_API_KEY = st.secrets["GROQ_API_KEY"]
 client = Groq(api_key=GROQ_API_KEY)
 
 # --- 2. THE SEARCH ENGINE ---
