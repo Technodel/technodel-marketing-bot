@@ -2,101 +2,132 @@ import streamlit as st
 import pandas as pd
 import openpyxl
 import random
-import google.generativeai as genai
 import os
+from groq import Groq
+from duckduckgo_search import DDGS
 
-# --- 1. SETUP & AI CONFIG ---
-# Replace with your actual Gemini API Key
-genai.configure(api_key="YOUR_GEMINI_API_KEY")
-model = genai.GenerativeModel('gemini-1.5-flash')
+# --- 1. AI CONFIGURATION ---
+GROQ_API_KEY = "GROQ_API_KEY = st.secrets["GROQ_API_KEY"]"
+client = Groq(api_key=GROQ_API_KEY)
 
-st.set_page_config(page_title="Technodel Marketing Bot", page_icon="📱")
+# --- 2. THE SEARCH ENGINE ---
+def get_real_specs(product_name):
+    try:
+        with DDGS() as ddgs:
+            query = f"{product_name} technical specifications features highlights"
+            results = [r['body'] for r in ddgs.text(query, max_results=4)]
+            return "\n".join(results) if results else "No specific web info found."
+    except Exception:
+        return "Search temporary unavailable."
 
-# CSS for better Right-to-Left (RTL) text support for Arabic
+# --- 3. EXCEL DATA LOGIC (Specific to 'search' sheet & B4/C4) ---
+def load_technodel_search_sheet(path):
+    all_items = []
+    try:
+        wb = openpyxl.load_workbook(path, data_only=True)
+        target_sheet_name = next((s for s in wb.sheetnames if s.lower() == "search"), None)
+        
+        if not target_sheet_name:
+            st.error("❌ Could not find a sheet named 'search' in your file.")
+            return []
+
+        ws = wb[target_sheet_name]
+        # Column B (2) = Name, Column C (3) = Price | Starting at Row 4
+        for row in ws.iter_rows(min_row=4, min_col=2, max_col=3):
+            name_val = row[0].value 
+            price_val = row[1].value 
+            if name_val and price_val:
+                try:
+                    price = int(round(float(str(price_val).replace(',', '')), 0))
+                    all_items.append({"name": str(name_val), "price": price})
+                except: continue
+    except Exception: pass
+    return all_items
+
+# --- 4. UI SETTINGS ---
+st.set_page_config(page_title="Technodel Marketing Bot 📱", layout="wide")
+
 st.markdown("""
     <style>
-    .arabic-text { text-align: right; direction: rtl; font-family: 'Arial'; }
-    .stTextArea textarea { text-align: right; direction: rtl; }
+    .header-container { display: flex; align-items: center; justify-content: center; gap: 20px; margin-bottom: 30px; }
+    .main-title { font-size: 2.5em; font-weight: bold; color: #004a99; margin: 0; }
+    .arabic-output { 
+        direction: rtl; text-align: right; background-color: #ffffff; 
+        padding: 25px; border-radius: 15px; border: 1px solid #eef2f6; 
+        font-family: 'Arial'; line-height: 1.8; color: #1a1a1a; font-size: 1.15em;
+    }
+    .zanouba-header { font-size: 1.4em; color: #d32f2f; font-weight: bold; text-align: center; margin-bottom: 15px; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- 2. DATA LOADING (Same logic as your Builder) ---
-def load_all_items(file_path):
-    all_products = []
-    try:
-        wb = openpyxl.load_workbook(file_path, data_only=True)
-        if "HARDWARE" in wb.sheetnames:
-            ws = wb["HARDWARE"]
-            for row in ws.iter_rows(min_row=2):
-                name = row[0].value
-                price = row[1].value
-                # Only pick rows that have a valid name and a price > 0
-                if name and isinstance(price, (int, float)) and price > 0:
-                    all_products.append({"ITEM": name, "PRICE": price})
-    except Exception as e:
-        st.error(f"Error loading Excel: {e}")
-    return all_products
+# --- 5. LOGO & HEADER ---
+LOGO_URL = "https://technodel.net/wp-content/uploads/2024/08/technodel-site-logo-01.webp"
+st.markdown(f'''
+    <div class="header-container">
+        <img src="{LOGO_URL}" width="120">
+        <h1 class="main-title">Technodel Marketing Bot</h1>
+    </div>
+    ''', unsafe_allow_html=True)
 
-# --- 3. AI PROMPT (The "Magic" for TikTok) ---
-def generate_arabic_offer(item_name, original_price, discount_price):
-    prompt = f"""
-    You are a viral social media manager for 'Technodel', a famous computer shop in Lebanon.
-    Write a TikTok post in Lebanese Arabic (using Arabic script) for this product: {item_name}.
-    
-    Prices:
-    - Original: ${original_price}
-    - Sale Price (after 5% discount): ${discount_price}
-    
-    Structure the response as follows:
-    1. A 'Hook' (خطة تسويقية) that grabs attention immediately.
-    2. A brief, high-energy description of the product.
-    3. Mention the 1-year warranty and 24-hour pickup at Technodel.
-    4. Call to Action: 'DM us or visit Technodel.net'.
-    5. Use lots of emojis (🔥, 💻, 🚀).
-    6. Include hashtags: #Technodel #Lebanon #Gaming #Offers #بسي_جي
-    
-    Make it sound modern, friendly, and exciting!
-    """
-    response = model.generate_content(prompt)
-    return response.text
+# File Selection
+files = [f for f in os.listdir('.') if f.endswith(('.xlsx', '.xlsm'))]
+selected_file = st.sidebar.selectbox("📂 Select Price List", files) if files else None
 
-# --- 4. APP UI ---
-st.title("📱 Technodel TikTok Bot")
-st.write("Generate viral Arabic offers from your Excel data.")
+col1, col2 = st.columns([1, 2])
 
-# File Selection (reusing your file logic)
-base_path = os.path.dirname(os.path.abspath(__file__))
-files = [f for f in os.listdir(base_path) if f.endswith(('.xlsx', '.xlsm'))]
+with col1:
+    if st.button("🎲 Pick Random Product"):
+        items = load_technodel_search_sheet(selected_file)
+        if items:
+            st.session_state.target = random.choice(items)
+            st.session_state.output = None
+            # Varied Greetings for Zainab
+            st.session_state.greeting = random.choice([
+                "تفضلي يا أحلى زنوبة، هيدا العرض صار جاهز! ✨",
+                "يا هلا بـ أميرة تكنوديل، تفضلي يا زنوبة: 👸",
+                "من عيوني يا زنوبة، أحلى بوست لأحلى صبية: 🌷",
+                "تكرمي يا زنوبة، شوفي شو حضرنا لليوم: 🔥"
+            ])
 
-if files:
-    selected_file = st.selectbox("Select Database", files)
-    file_path = os.path.join(base_path, selected_file)
-    
-    if st.button("🎲 Pick a Random Product"):
-        products = load_all_items(file_path)
-        if products:
-            st.session_state.marketing_item = random.choice(products)
-            st.session_state.marketing_done = False
-        else:
-            st.error("No valid products found in the 'HARDWARE' sheet.")
-
-    if 'marketing_item' in st.session_state:
-        item = st.session_state.marketing_item
-        orig_p = item['PRICE']
-        disc_p = int(orig_p * 0.95) # 5% Discount
+    if 'target' in st.session_state:
+        target = st.session_state.target
+        promo_price = int(round(target['price'] * 0.95, 0))
         
-        st.info(f"📍 **Selected:** {item['ITEM']} | **Price:** ${orig_p}")
+        st.success(f"📦 **Selected:** {target['name']}")
+        st.info(f"💰 **List Price:** ${target['price']}")
         
-        if st.button(f"✨ Generate Arabic Offer for ${disc_p}"):
-            with st.spinner("Writing your Arabic TikTok post..."):
-                offer = generate_arabic_offer(item['ITEM'], orig_p, disc_p)
-                st.session_state.final_offer_arabic = offer
-                st.session_state.marketing_done = True
+        # Dynamic Button Text
+        if st.button(f"✨ Generate Offer at {promo_price}$"):
+            with st.spinner("Searching specs & writing in Lebanese..."):
+                real_info = get_real_specs(target['name'])
+                try:
+                    completion = client.chat.completions.create(
+                        model="llama-3.3-70b-versatile",
+                        messages=[
+                            {"role": "system", "content": "You are a professional Lebanese tech salesman. You ONLY use Lebanese Arabic dialect (Ammiya). NEVER use formal/Fusha Arabic. Your tone is helpful and high-energy."},
+                            {"role": "user", "content": f"""
+                                ITEM: {target['name']}
+                                ORIGINAL PRICE: ${target['price']}
+                                PROMO PRICE: ${promo_price}
+                                SPECS: {real_info}
+                                
+                                Instructions for a True Lebanese Offer:
+                                1. Start with a strong Lebanese hook (e.g., 'يا بلاش من تكنوديل', 'شي فاخر من الآخر').
+                                2. Describe the item in a detailed paragraph in Lebanese.
+                                3. Use the specs found to list 5-6 features in Lebanese bullet points.
+                                4. Contrast the price: 'كان بـ ${target['price']} وهلق صار بس بـ ${promo_price}'.
+                                5. Mention 1-year warranty ('كفالة سنة') and pickup/delivery in 24h.
+                                6. STRICT: No hashtags (#), No links, No formal Arabic words like 'هذا' (use 'هيدا') or 'سوف' (use 'رح').
+                            """}
+                        ],
+                    )
+                    st.session_state.output = completion.choices[0].message.content
+                except Exception as e:
+                    st.error(f"AI Error: {e}")
 
-    if st.session_state.get('marketing_done'):
-        st.subheader("📝 Your TikTok Content:")
-        st.text_area("Copy and Paste:", st.session_state.final_offer_arabic, height=400)
-        st.caption("Tip: You can edit the text before copying it!")
-
-else:
-    st.warning("Please upload your hardware Excel file to the app folder.")
+with col2:
+    if st.session_state.get('output'):
+        st.markdown(f'<div class="zanouba-header">{st.session_state.greeting}</div>', unsafe_allow_html=True)
+        # Display output with line breaks
+        formatted_text = st.session_state.output.replace('\n', '<br>')
+        st.markdown(f'<div class="arabic-output">{formatted_text}</div>', unsafe_allow_html=True)
