@@ -5,34 +5,35 @@ from groq import Groq
 from duckduckgo_search import DDGS
 from streamlit_gsheets import GSheetsConnection
 
-# --- 1. AI & CONNECTION SETUP ---
+# --- 1. AI SETUP ---
+# We pull only the Groq Key here; the Sheet URL is handled by the connection tool
 GROQ_API_KEY = st.secrets["GROQ_API_KEY"]
-SHEET_URL = st.secrets["gsheets_url"]
 client = Groq(api_key=GROQ_API_KEY)
 
 # --- 2. GOOGLE SHEETS LOGIC ---
 def load_data_from_gsheets():
     try:
-        # Connect using st.connection as requested
+        # This automatically looks for [connections.gsheets] in your secrets
         conn = st.connection("gsheets", type=GSheetsConnection)
-        # Read the 'search' worksheet, refresh every 10 mins (ttl=600)
-        df = conn.read(spreadsheet=SHEET_URL, worksheet="search", ttl=600)
+        
+        # Read the sheet (ttl=600 keeps it fresh for 10 mins) [cite: 2026-02-19]
+        df = conn.read(ttl=600)
         
         all_items = []
-        # We start looking from the data (skipping headers to hit Row 4 logic)
-        # In Google Sheets, df.iloc[0] is usually Row 2. So we skip 2 rows to get to Row 4.
+        # Logic: Start from Row 4 (index 2). Name is Column B (1), Price is Column C (2) [cite: 2026-02-16]
         for index, row in df.iloc[2:].iterrows():
-            name_val = row.iloc[1]   # Column B
-            price_val = row.iloc[2]  # Column C
+            name_val = row.iloc[1]   
+            price_val = row.iloc[2]  
             
             if pd.notna(name_val) and pd.notna(price_val):
                 try:
+                    # Clean the price string to make it a number
                     price = int(round(float(str(price_val).replace('$', '').replace(',', '')), 0))
                     all_items.append({"name": str(name_val), "price": price})
                 except: continue
         return all_items
     except Exception as e:
-        st.error(f"Error connecting to Google Sheets: {e}")
+        st.error(f"Connection Error: {e}")
         return []
 
 # --- 3. WEB SEARCH ---
@@ -47,6 +48,7 @@ def get_real_specs(product_name):
 # --- 4. UI SETTINGS ---
 st.set_page_config(page_title="Technodel Marketing Bot 📱", layout="wide")
 
+# Custom CSS for the Lebanese output box
 st.markdown("""
     <style>
     .arabic-output { 
@@ -62,7 +64,6 @@ st.image("https://technodel.net/wp-content/uploads/2024/08/technodel-site-logo-0
 st.title("Technodel Marketing Bot")
 
 # --- 5. MAIN LOGIC ---
-# Load data automatically from Google Sheets
 items = load_data_from_gsheets()
 
 col1, col2 = st.columns([1, 2])
@@ -74,7 +75,7 @@ with col1:
             st.session_state.output = None
             st.session_state.greeting = "يا هلا بـ زنوبة، هيدا العرض صار جاهز! ✨"
         else:
-            st.warning("Could not find any items in the 'search' sheet.")
+            st.warning("Could not find any items in the sheet. Check your Google Sheet structure.")
 
     if 'target' in st.session_state:
         target = st.session_state.target
